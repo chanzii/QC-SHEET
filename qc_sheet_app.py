@@ -13,10 +13,11 @@ QC시트 자동 생성기 – 배포용데이터 완전판 (2025‑06‑26)
 ----------------------------------------------------
 * spec 워크북 `read_only=True` 적용 → 속도·메모리 최적화
 * 기능: 영어/한국어 측정부위 선택, 다중 이미지/삭제, 스타일넘버 정확 매칭
+* 🔄 **UI 개선** – 업로드 카드 *바로 아래* 삭제 버튼(❌) 복구   ← NEW
 """
 
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
-st.title(" QC시트 생성기 ")
+st.title(" QC시트 생성기 | 파일 업로드 및 관리")
 
 # -------------------------------------------------------
 # 경로 설정
@@ -29,41 +30,36 @@ for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
     os.makedirs(folder, exist_ok=True)
 
 # -------------------------------------------------------
-# 업로드 & 삭제 UI 함수
+# 업로드 + 삭제 UI (카드 아래) 함수
 # -------------------------------------------------------
 
-def uploader(label: str, subfolder: str, multiple: bool):
-    files = st.file_uploader(label, type=["xlsx", "png", "jpg", "jpeg"], accept_multiple_files=multiple)
+def upload_and_list(title: str, subfolder: str, types: list[str], multiple: bool):
+    """파일 업로드 + 목록/삭제 UI 한 번에 처리"""
+    st.markdown(f"**{title} 업로드**")
+    files = st.file_uploader("Drag and drop", type=types, accept_multiple_files=multiple, key=f"uploader_{subfolder}")
     if files:
         for f in files:
             with open(os.path.join(subfolder, f.name), "wb") as fp:
                 fp.write(f.getbuffer())
         st.success("✅ 업로드 완료!")
+    # 파일 목록 + 삭제 버튼
+    for fn in os.listdir(subfolder):
+        cols = st.columns([8, 1])
+        cols[0].write(fn)
+        if cols[1].button("❌", key=f"del_{subfolder}_{fn}"):
+            os.remove(os.path.join(subfolder, fn))
+            st.experimental_rerun()
 
 # -------------------------------------------------------
-# 사이드바 – 파일 업로드 및 관리
+# 메인 – 업로드 카드 3개 (스펙 / 양식 / 이미지)
 # -------------------------------------------------------
-
-st.sidebar.header("📁 파일 업로드 및 관리")
-col_spec, col_tmp, col_img = st.sidebar.columns(3)
-with col_spec:
-    uploader("🧾 스펙 엑셀", SPEC_DIR, multiple=True)
-with col_tmp:
-    uploader("📄 QC시트 양식", TEMPLATE_DIR, multiple=False)
-with col_img:
-    uploader("🖼️ 서명/로고", IMAGE_DIR, multiple=True)
-
-with st.sidebar.expander("🗑️ 업로드한 파일 삭제"):
-    for label, path in ("스펙", SPEC_DIR), ("양식", TEMPLATE_DIR), ("이미지", IMAGE_DIR):
-        files = os.listdir(path)
-        if files:
-            st.markdown(f"**{label} 파일**")
-            for fn in files:
-                cols = st.columns([8, 1])
-                cols[0].write(fn)
-                if cols[1].button("❌", key=f"del_{path}_{fn}"):
-                    os.remove(os.path.join(path, fn))
-                    st.experimental_rerun()
+col1, col2, col3 = st.columns(3)
+with col1:
+    upload_and_list("📑 스펙 엑셀", SPEC_DIR, ["xlsx"], multiple=True)
+with col2:
+    upload_and_list("📄 QC시트 양식", TEMPLATE_DIR, ["xlsx"], multiple=False)
+with col3:
+    upload_and_list("🖼️ 서명/로고", IMAGE_DIR, ["png", "jpg", "jpeg"], multiple=True)
 
 st.markdown("---")
 
@@ -182,8 +178,4 @@ if st.button("🚀 QC시트 생성"):
     st.download_button(
         label="⬇️ QC시트 다운로드",
         data=buffer,
-        file_name=out_name,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    st.success("✅ QC시트가 생성되었습니다!")
-
+        file_name=out
