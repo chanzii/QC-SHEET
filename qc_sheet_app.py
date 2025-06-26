@@ -70,8 +70,6 @@ selected_size = st.selectbox("사이즈 선택", size_options)
 logo_files = ["(기본 로고 사용)"] + os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files)
 
-# 🔤 측정부위 열 선택 (B=English, C=Korean)
-lang_to_col = {"English": 1, "Korean": 2}  # 0-index -> B열=1, C열=2
 language_choice = st.selectbox("측정부위 언어", ["English", "Korean"], index=0)
 
 if st.button("🚀 QC시트 생성"):
@@ -130,15 +128,34 @@ if st.button("🚀 QC시트 생성"):
     size_col_zero = size_idx_map[selected_size]  # 0‑index
 
     # ----------- 6. 측정부위 & 치수 추출 -----------
-    part_col_zero = lang_to_col[language_choice]  # B=1, C=2
-
+    rows = list(ws_spec.iter_rows(min_row=3, values_only=True))
     data = []
-    for row in ws_spec.iter_rows(min_row=3, values_only=True):
-        part_raw = row[part_col_zero]
-        part = str(part_raw).strip() if part_raw is not None else ""
-        value = row[size_col_zero]
-        if part and value is not None:
-            data.append((part, value))
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        part_raw = row[1]  # LIST 컬럼 (B열)
+        part = str(part_raw).strip() if part_raw else ""
+        val = row[size_col_zero]
+        has_en = bool(re.search(r"[A-Za-z]", part))
+        has_kr = bool(re.search(r"[가-힣]", part))
+
+        if language_choice == "English":
+            if has_en and val is not None:
+                data.append((part, val))
+            i += 1
+        else:  # Korean
+            # 영어 행 + 값이 있고 다음 행에 한글 항목이 있을 경우 매칭
+            if has_en and val is not None and i + 1 < len(rows):
+                next_part_raw = rows[i + 1][1]
+                next_part = str(next_part_raw).strip() if next_part_raw else ""
+                if re.search(r"[가-힣]", next_part):
+                    data.append((next_part, val))
+                    i += 2
+                    continue  # 다음 루프
+            # 혹시 현재 행 자체가 한글 + 값이 있다면 그대로 사용
+            if has_kr and val is not None:
+                data.append((part, val))
+            i += 1
 
     if not data:
         st.error("⚠️ 추출된 데이터가 없습니다. 시트를 확인하세요.")
@@ -146,8 +163,8 @@ if st.button("🚀 QC시트 생성"):
 
     # ----------- 7. 템플릿에 삽입 -----------
     start_row = 9
-    for i, (part, val) in enumerate(data):
-        r = start_row + i
+    for idx, (part, val) in enumerate(data):
+        r = start_row + idx
         ws_tpl.cell(r, 1, part)   # A열: 측정항목
         ws_tpl.cell(r, 2, val)    # B열: 스펙치수
         ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")  # D열 BAL
@@ -161,3 +178,4 @@ if st.button("🚀 QC시트 생성"):
         st.download_button("📥 QC시트 다운로드", f, file_name=out_name)
 
     st.success("✅ QC시트가 생성되었습니다!")
+
