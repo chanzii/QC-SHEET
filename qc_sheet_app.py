@@ -29,10 +29,10 @@ for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
     os.makedirs(folder, exist_ok=True)
 
 # -------------------------------------------------------
-# 업로드 & 삭제 UI
+# 업로드 & 삭제 UI 함수
 # -------------------------------------------------------
 
-def uploader(label, subfolder, multiple):
+def uploader(label: str, subfolder: str, multiple: bool):
     files = st.file_uploader(label, type=["xlsx", "png", "jpg", "jpeg"], accept_multiple_files=multiple)
     if files:
         for f in files:
@@ -40,16 +40,20 @@ def uploader(label, subfolder, multiple):
                 fp.write(f.getbuffer())
         st.success("✅ 업로드 완료!")
 
-st.subheader("📁 파일 업로드 및 관리")
-col_spec, col_tmp, col_img = st.columns(3)
-with col_spec:
-    uploader("🧾 스펙 엑셀 업로드", SPEC_DIR, multiple=True)
-with col_tmp:
-    uploader("📄 QC시트 양식 업로드", TEMPLATE_DIR, multiple=False)
-with col_img:
-    uploader("🖼️ 서명/로고 업로드", IMAGE_DIR, multiple=True)
+# -------------------------------------------------------
+# 사이드바 – 파일 업로드 및 관리
+# -------------------------------------------------------
 
-with st.expander("🗑️ 업로드된 파일 삭제하기"):
+st.sidebar.header("📁 파일 업로드 및 관리")
+col_spec, col_tmp, col_img = st.sidebar.columns(3)
+with col_spec:
+    uploader("🧾 스펙 엑셀", SPEC_DIR, multiple=True)
+with col_tmp:
+    uploader("📄 QC시트 양식", TEMPLATE_DIR, multiple=False)
+with col_img:
+    uploader("🖼️ 서명/로고", IMAGE_DIR, multiple=True)
+
+with st.sidebar.expander("🗑️ 업로드한 파일 삭제"):
     for label, path in ("스펙", SPEC_DIR), ("양식", TEMPLATE_DIR), ("이미지", IMAGE_DIR):
         files = os.listdir(path)
         if files:
@@ -70,19 +74,19 @@ st.markdown("---")
 st.subheader("📄 QC시트 생성")
 
 spec_files = os.listdir(SPEC_DIR)
-selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
+selected_spec = st.selectbox("사용할 스펙 엑셀", spec_files) if spec_files else None
 style_number = st.text_input("스타일넘버 입력")
 size_options = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]
 selected_size = st.selectbox("사이즈 선택", size_options)
 logo_files = ["(기본 로고 사용)"] + os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files)
 
-language_choice = st.selectbox("측정부위 언어", ["English", "Korean"], index=0)
+language_choice = st.radio("측정부위 언어", ["English", "Korean"], horizontal=True)
 
 if st.button("🚀 QC시트 생성"):
     # ----------- 0. 기본 검증 -----------
     if not selected_spec or not style_number:
-        st.error("⚠️ 스펙 파일과 스타일넘버를 확인하세요.")
+        st.error("⚠️ 스펙 파일과 스타일넘버를 입력하세요.")
         st.stop()
     template_list = os.listdir(TEMPLATE_DIR)
     if not template_list:
@@ -93,24 +97,18 @@ if st.button("🚀 QC시트 생성"):
     template_path = os.path.join(TEMPLATE_DIR, template_list[0])
 
     # ----------- 1. 스펙 워크시트 찾기 -----------
-    wb_spec = load_workbook(spec_path, data_only=True, read_only=True)  # read_only 적용
+    wb_spec = load_workbook(spec_path, data_only=True, read_only=True)
 
-    def matches_style(cell_val: str, style: str) -> bool:
-        if not cell_val:
-            return False
-        txt = str(cell_val).upper()
-        style = style.upper()
-        return style in txt
+    def find_sheet(wb, target):
+        pat = re.compile(r"STYLE\s*NO\s*[:：]?\s*([A-Z0-9#\-]+)", re.I)
+        for ws in wb.worksheets:
+            cell = str(ws["A1"].value).strip() if ws["A1"].value else ""
+            m = pat.search(cell)
+            if m and m.group(1).upper() == target.upper():
+                return ws
+        return None
 
-    ws_spec = None
-    for ws in wb_spec.worksheets:
-        a1 = ws["A1"].value
-        if matches_style(a1, style_number):
-            ws_spec = ws
-            break
-    if not ws_spec:
-        ws_spec = wb_spec.active
-        st.warning("❗ A1 셀에서 스타일넘버가 일치하는 시트를 찾지 못해, 첫 시트를 사용합니다.")
+    ws_spec = find_sheet(wb_spec, style_number) or wb_spec.active
 
     # ----------- 2. 템플릿 로드 -----------
     wb_tpl = load_workbook(template_path)
@@ -126,40 +124,42 @@ if st.button("🚀 QC시트 생성"):
         ws_tpl.add_image(XLImage(logo_path), "F2")
 
     # ----------- 5. 사이즈 열 인덱스 -----------
-    header_row = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
-    size_idx_map = {str(val).strip(): idx for idx, val in enumerate(header_row) if val}
-    if selected_size not in size_idx_map:
-        st.error("⚠️ 선택한 사이즈 열이 없습니다. 스펙 파일 확인!")
+    header = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
+    size_col_map = {str(v).strip(): idx for idx, v in enumerate(header) if v}
+    if selected_size not in size_col_map:
+        st.error("⚠️ 선택한 사이즈 열이 없습니다.")
         st.stop()
-    size_col = size_idx_map[selected_size]
+    size_idx = size_col_map[selected_size]
 
     # ----------- 6. 측정부위 & 치수 추출 -----------
-    rows = list(ws_spec.iter_rows(min_row=3, values_only=True))
     data = []
+    rows = list(ws_spec.iter_rows(min_row=3, values_only=True))
     i = 0
     while i < len(rows):
         row = rows[i]
-        part_raw = row[1]  # B열 영어
-        part = str(part_raw).strip() if part_raw else ""
-        val = row[size_col]
+        en_part = str(row[1]).strip() if row[1] else ""
+        value   = row[size_idx]
+        if not en_part or value is None:
+            i += 1
+            continue
 
-        has_en = bool(re.search(r"[A-Za-z]", part))
-        has_kr = bool(re.search(r"[가-힣]", part))
+        # 한글 라인 존재 여부
+        kr_part = ""
+        if i + 1 < len(rows):
+            nxt = rows[i + 1]
+            kr_part = str(nxt[1]).strip() if nxt[1] else ""
 
         if language_choice == "English":
-            if has_en and val is not None:
-                data.append((part, val))
+            if re.search(r"[A-Za-z]", en_part):
+                data.append((en_part, value))
             i += 1
         else:  # Korean
-            if has_en and val is not None and i + 1 < len(rows):
-                next_part_raw = rows[i + 1][1]
-                next_part = str(next_part_raw).strip() if next_part_raw else ""
-                if re.search(r"[가-힣]", next_part):
-                    data.append((next_part, val))
-                    i += 2
-                    continue
-            if has_kr and val is not None:
-                data.append((part, val))
+            if re.search(r"[가-힣]", kr_part):
+                data.append((kr_part, value))
+                i += 2
+                continue
+            elif re.search(r"[가-힣]", en_part):
+                data.append((en_part, value))
             i += 1
 
     if not data:
@@ -178,5 +178,12 @@ if st.button("🚀 QC시트 생성"):
     out_name = f"QC_{style_number}_{selected_size}.xlsx"
     buffer = BytesIO()
     wb_tpl.save(buffer)
-    st.download_button("⬇️ QC시트 다운로드", data=buffer.getvalue(),
-                       file_name=out
+    buffer.seek(0)
+    st.download_button(
+        label="⬇️ QC시트 다운로드",
+        data=buffer,
+        file_name=out_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    st.success("✅ QC시트가 생성되었습니다!")
+
