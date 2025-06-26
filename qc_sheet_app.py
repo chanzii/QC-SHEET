@@ -13,7 +13,7 @@ QC시트 자동 생성기 – 배포용데이터 완전판 (2025‑06‑26)
 ----------------------------------------------------
 * spec 워크북 `read_only=True` 적용 → 속도·메모리 최적화
 * 기능: 영어/한국어 측정부위 선택, 다중 이미지/삭제, 스타일넘버 정확 매칭
-* 🔄 **UI 개선** – 업로드 카드 *바로 아래* 삭제 버튼(❌) 복구   ← NEW
+* 🔄 **UI 개선** – 업로드 카드 아래 삭제 버튼 복구
 """
 
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
@@ -175,9 +175,11 @@ if st.button("🚀 QC시트 생성"):
     buffer = BytesIO()
     wb_tpl.save(buffer)
     buffer.seek(0)
-       st.download_button(
+    st.download_button(
         label="⬇️ QC시트 다운로드",
-        data=buffer,
+        data=buffer.getvalue(),
         file_name=out_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+    st.success("✅ QC시트가 생성되었습니다!")
+
