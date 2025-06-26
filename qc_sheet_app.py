@@ -175,7 +175,9 @@ if st.button("🚀 QC시트 생성"):
     buffer = BytesIO()
     wb_tpl.save(buffer)
     buffer.seek(0)
-    st.download_button(
+       st.download_button(
         label="⬇️ QC시트 다운로드",
         data=buffer,
-        file_name=out
+        file_name=out_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
