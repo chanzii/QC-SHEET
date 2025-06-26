@@ -70,6 +70,9 @@ selected_size = st.selectbox("사이즈 선택", size_options)
 logo_files = ["(기본 로고 사용)"] + os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files)
 
+# 🔤 측정부위 언어 선택 추가
+language_choice = st.selectbox("측정부위 언어", ["English", "Korean"], index=0)
+
 if st.button("🚀 QC시트 생성"):
     # ----------- 0. 기본 검증 -----------
     if not selected_spec or not style_number:
@@ -128,13 +131,23 @@ if st.button("🚀 QC시트 생성"):
     # ----------- 6. 측정부위(B열) & 치수 추출 -----------
     data = []
     for row in ws_spec.iter_rows(min_row=3, values_only=True):
-        part = str(row[1]).strip() if row[1] is not None else ""
+        part_raw = row[1]  # B열 LIST
+        part = str(part_raw).strip() if part_raw is not None else ""
         value = row[size_col_zero]
-        if part and value is not None:
-            data.append((part, value))
+        if not part or value is None:
+            continue
+
+        # 언어 필터 적용
+        if language_choice == "English":
+            if not re.search(r"[A-Za-z]", part):
+                continue
+        else:  # Korean
+            if not re.search(r"[가-힣]", part):
+                continue
+        data.append((part, value))
 
     if not data:
-        st.error("⚠️ 추출된 데이터가 없습니다. 시트를 확인하세요.")
+        st.error("⚠️ 추출된 데이터가 없습니다. 언어 설정/시트를 확인하세요.")
         st.stop()
 
     # ----------- 7. 템플릿에 삽입 -----------
