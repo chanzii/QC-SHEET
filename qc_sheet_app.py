@@ -2,10 +2,11 @@ import streamlit as st
 import os
 from io import BytesIO
 from tempfile import TemporaryDirectory
-from openpyxl import load_workbook
-from openpyxl.drawing.image import Image as XLImage
+from pathlib import Path
 import re
 import shutil
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as XLImage
 
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
 st.title(" QC시트 생성기 ")
@@ -21,7 +22,7 @@ for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
     os.makedirs(folder, exist_ok=True)
 
 # -------------------------------------------------------
-# 파일 업로드 & 삭제 UI
+# 업로드 & 삭제 UI
 # -------------------------------------------------------
 
 def uploader(label, subfolder, multiple):
@@ -41,7 +42,6 @@ with col_tmp:
 with col_img:
     uploader("🖼️ 서명/로고 업로드", IMAGE_DIR, multiple=True)
 
-# 삭제 UI
 with st.expander("🗑️ 업로드된 파일 삭제하기"):
     for label, path in ("스펙", SPEC_DIR), ("양식", TEMPLATE_DIR), ("이미지", IMAGE_DIR):
         files = os.listdir(path)
@@ -71,7 +71,7 @@ logo_files = ["(기본 로고 사용)"] + os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files)
 
 if st.button("🚀 QC시트 생성"):
-    # 기본 검증
+    # ----------- 0. 기본 검증 -----------
     if not selected_spec or not style_number:
         st.error("⚠️ 스펙 파일과 스타일넘버를 확인하세요.")
         st.stop()
@@ -83,30 +83,49 @@ if st.button("🚀 QC시트 생성"):
     spec_path = os.path.join(SPEC_DIR, selected_spec)
     template_path = os.path.join(TEMPLATE_DIR, template_list[0])
 
+    # ----------- 1. 스펙 워크시트 찾기 -----------
     wb_spec = load_workbook(spec_path, data_only=True)
-    ws_spec = wb_spec.active
 
+    def matches_style(cell_val: str, style: str) -> bool:
+        if not cell_val:
+            return False
+        txt = str(cell_val).upper()
+        style = style.upper()
+        return style in txt  # 포함 체크 (A1: "STYLE NO: JXFTO11" 등)
+
+    ws_spec = None
+    for ws in wb_spec.worksheets:
+        a1 = ws["A1"].value
+        if matches_style(a1, style_number):
+            ws_spec = ws
+            break
+    # 못 찾으면 첫 시트를 사용하고 경고
+    if not ws_spec:
+        ws_spec = wb_spec.active
+        st.warning("❗ A1 셀에서 스타일넘버가 일치하는 시트를 찾지 못해, 첫 시트를 사용합니다.")
+
+    # ----------- 2. 템플릿 로드 -----------
     wb_tpl = load_workbook(template_path)
     ws_tpl = wb_tpl.active
 
-    # 1) 스타일넘버 & 사이즈 입력
+    # ----------- 3. 스타일넘버 & 사이즈 입력 -----------
     ws_tpl["B6"] = style_number
     ws_tpl["G6"] = selected_size
 
-    # 2) 로고 삽입 (선택)
+    # ----------- 4. 로고 삽입 (선택) -----------
     if selected_logo != "(기본 로고 사용)":
         logo_path = os.path.join(IMAGE_DIR, selected_logo)
         ws_tpl.add_image(XLImage(logo_path), "F2")
 
-    # 3) 사이즈 열 인덱스 찾기 (2행 기준)
-    size_row = [str(x) for x in next(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))]
-    size_idx_map = {val: idx for idx, val in enumerate(size_row)}
+    # ----------- 5. 사이즈 열 인덱스 찾기 (2행) -----------
+    header_row = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
+    size_idx_map = {str(val).strip(): idx for idx, val in enumerate(header_row) if val}
     if selected_size not in size_idx_map:
         st.error("⚠️ 선택한 사이즈 열이 없습니다. 스펙 파일 확인!")
         st.stop()
     size_col_zero = size_idx_map[selected_size]  # 0‑index
 
-    # 4) 측정부위(B열) & 치수 추출
+    # ----------- 6. 측정부위(B열) & 치수 추출 -----------
     data = []
     for row in ws_spec.iter_rows(min_row=3, values_only=True):
         part = str(row[1]).strip() if row[1] is not None else ""
@@ -118,15 +137,15 @@ if st.button("🚀 QC시트 생성"):
         st.error("⚠️ 추출된 데이터가 없습니다. 시트를 확인하세요.")
         st.stop()
 
-    # 5) 템플릿에 삽입
+    # ----------- 7. 템플릿에 삽입 -----------
     start_row = 9
     for i, (part, val) in enumerate(data):
         r = start_row + i
         ws_tpl.cell(r, 1, part)   # A열: 측정항목
-        ws_tpl.cell(r, 2, val)    # B열: 스펙 사이즈 값
+        ws_tpl.cell(r, 2, val)    # B열: 스펙치수
         ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")  # D열 BAL
 
-    # 6) 저장 & 다운로드
+    # ----------- 8. 저장 & 다운로드 -----------
     out_name = f"QC_{style_number}_{selected_size}.xlsx"
     tmp_path = os.path.join("/tmp", out_name)
     wb_tpl.save(tmp_path)
@@ -135,4 +154,3 @@ if st.button("🚀 QC시트 생성"):
         st.download_button("📥 QC시트 다운로드", f, file_name=out_name)
 
     st.success("✅ QC시트가 생성되었습니다!")
-
