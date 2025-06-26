@@ -104,7 +104,11 @@ if st.button("🚀 QC시트 생성"):
                 return ws
         return None
 
-    ws_spec = find_sheet(wb_spec, style_number) or wb_spec.active
+    ws_spec = find_sheet(wb_spec, style_number)
+    if ws_spec is None:
+        st.error("⚠️ STYLE NO가 정확히 일치하는 시트를 찾지 못했습니다.
+엑셀 시트 A1 셀을 확인하세요.")
+        st.stop()
 
     # ----------- 2. 템플릿 로드 -----------
     wb_tpl = load_workbook(template_path)
@@ -182,4 +186,3 @@ if st.button("🚀 QC시트 생성"):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     st.success("✅ QC시트가 생성되었습니다!")
-
