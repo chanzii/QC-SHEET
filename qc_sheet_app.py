@@ -150,7 +150,7 @@ if st.button("🚀 QC시트 생성"):
             if has_en and val is not None:
                 data.append((part, val))
             i += 1
-        else:  # Korean
+        else:  # Korean 선택
             if has_en and val is not None and i + 1 < len(rows):
                 next_part_raw = rows[i + 1][1]
                 next_part = str(next_part_raw).strip() if next_part_raw else ""
@@ -170,13 +170,9 @@ if st.button("🚀 QC시트 생성"):
     start_row = 9
     for idx, (part, val) in enumerate(data):
         r = start_row + idx
-        ws_tpl.cell(r, 1, part)
-        ws_tpl.cell(r, 2, val)
+        ws_tpl.cell(r, 1, part)     # 측정부위
+        ws_tpl.cell(r, 2, val)      # 스펙 치수
         ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
 
     # ----------- 8. 저장 & 다운로드 -----------
-    out_name = f"QC_{style_number}_{selected_size}.xlsx"
-    tmp_path = os.path.join("/tmp", out_name)
-    wb_tpl.save(tmp_path)
-
-    with open(tmp
+    out_name = f"QC_{style
