@@ -8,6 +8,13 @@ import shutil
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
 
+"""
+QC시트 자동 생성기 – 배포용데이터 완전판 (2025‑06‑26)
+----------------------------------------------------
+* spec 워크북 `read_only=True` 적용 → 속도·메모리 최적화
+* 기능: 영어/한국어 측정부위 선택, 다중 이미지/삭제, 스타일넘버 정확 매칭
+"""
+
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
 st.title(" QC시트 생성기 ")
 
@@ -86,7 +93,7 @@ if st.button("🚀 QC시트 생성"):
     template_path = os.path.join(TEMPLATE_DIR, template_list[0])
 
     # ----------- 1. 스펙 워크시트 찾기 -----------
-    wb_spec = load_workbook(spec_path, data_only=True)
+    wb_spec = load_workbook(spec_path, data_only=True, read_only=True)  # read_only 적용
 
     def matches_style(cell_val: str, style: str) -> bool:
         if not cell_val:
@@ -133,7 +140,7 @@ if st.button("🚀 QC시트 생성"):
     i = 0
     while i < len(rows):
         row = rows[i]
-        part_raw = row[1]  # LIST 컬럼 (B열)
+        part_raw = row[1]  # B열 LIST
         part = str(part_raw).strip() if part_raw else ""
         val = row[size_col_zero]
         has_en = bool(re.search(r"[A-Za-z]", part))
@@ -144,15 +151,13 @@ if st.button("🚀 QC시트 생성"):
                 data.append((part, val))
             i += 1
         else:  # Korean
-            # 영어 행 + 값이 있고 다음 행에 한글 항목이 있을 경우 매칭
             if has_en and val is not None and i + 1 < len(rows):
                 next_part_raw = rows[i + 1][1]
                 next_part = str(next_part_raw).strip() if next_part_raw else ""
                 if re.search(r"[가-힣]", next_part):
                     data.append((next_part, val))
                     i += 2
-                    continue  # 다음 루프
-            # 혹시 현재 행 자체가 한글 + 값이 있다면 그대로 사용
+                    continue
             if has_kr and val is not None:
                 data.append((part, val))
             i += 1
@@ -165,17 +170,13 @@ if st.button("🚀 QC시트 생성"):
     start_row = 9
     for idx, (part, val) in enumerate(data):
         r = start_row + idx
-        ws_tpl.cell(r, 1, part)   # A열: 측정항목
-        ws_tpl.cell(r, 2, val)    # B열: 스펙치수
-        ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")  # D열 BAL
+        ws_tpl.cell(r, 1, part)
+        ws_tpl.cell(r, 2, val)
+        ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
 
     # ----------- 8. 저장 & 다운로드 -----------
     out_name = f"QC_{style_number}_{selected_size}.xlsx"
     tmp_path = os.path.join("/tmp", out_name)
     wb_tpl.save(tmp_path)
 
-    with open(tmp_path, "rb") as f:
-        st.download_button("📥 QC시트 다운로드", f, file_name=out_name)
-
-    st.success("✅ QC시트가 생성되었습니다!")
-
+    with open(tmp
