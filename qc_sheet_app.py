@@ -10,156 +10,129 @@ import shutil
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
 st.title(" QC시트 생성기 ")
 
+# -------------------------------------------------------
 # 경로 설정
+# -------------------------------------------------------
 BASE_DIR = "uploaded"
 SPEC_DIR = os.path.join(BASE_DIR, "spec")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "template")
 IMAGE_DIR = os.path.join(BASE_DIR, "image")
-os.makedirs(SPEC_DIR, exist_ok=True)
-os.makedirs(TEMPLATE_DIR, exist_ok=True)
-os.makedirs(IMAGE_DIR, exist_ok=True)
+for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
+    os.makedirs(folder, exist_ok=True)
 
-# ----------- 파일 업로드 및 관리 ------------
+# -------------------------------------------------------
+# 파일 업로드 & 삭제 UI
+# -------------------------------------------------------
+
+def uploader(label, subfolder, multiple):
+    files = st.file_uploader(label, type=["xlsx", "png", "jpg", "jpeg"], accept_multiple_files=multiple)
+    if files:
+        for f in files:
+            with open(os.path.join(subfolder, f.name), "wb") as fp:
+                fp.write(f.getbuffer())
+        st.success("✅ 업로드 완료!")
 
 st.subheader("📁 파일 업로드 및 관리")
+col_spec, col_tmp, col_img = st.columns(3)
+with col_spec:
+    uploader("🧾 스펙 엑셀 업로드", SPEC_DIR, multiple=True)
+with col_tmp:
+    uploader("📄 QC시트 양식 업로드", TEMPLATE_DIR, multiple=False)
+with col_img:
+    uploader("🖼️ 서명/로고 업로드", IMAGE_DIR, multiple=True)
 
-# --- 스펙 파일 업로드 ---
-spec_files = os.listdir(SPEC_DIR)
-uploaded_specs = st.file_uploader("사이즈 스펙 엑셀파일 업로드 (여러 개 가능)", type=["xlsx"], accept_multiple_files=True)
-if uploaded_specs:
-    for spec_file in uploaded_specs:
-        save_path = os.path.join(SPEC_DIR, spec_file.name)
-        with open(save_path, "wb") as f:
-            f.write(spec_file.getbuffer())
-    st.success("✅ 스펙 엑셀 업로드 완료!")
-
-# --- QC시트 양식 파일 업로드 ---
-template_files = os.listdir(TEMPLATE_DIR)
-uploaded_template = st.file_uploader("QC시트 양식 엑셀파일 업로드", type=["xlsx"], accept_multiple_files=False)
-if uploaded_template:
-    save_path = os.path.join(TEMPLATE_DIR, uploaded_template.name)
-    with open(save_path, "wb") as f:
-        f.write(uploaded_template.getbuffer())
-    st.success("✅ QC시트 양식 업로드 완료!")
-
-# --- 이미지 파일 업로드 ---
-image_files = os.listdir(IMAGE_DIR)
-uploaded_images = st.file_uploader("이미지(로고/서명) 업로드", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-if uploaded_images:
-    for image_file in uploaded_images:
-        save_path = os.path.join(IMAGE_DIR, image_file.name)
-        with open(save_path, "wb") as f:
-            f.write(image_file.getbuffer())
-    st.success("✅ 이미지 저장 완료!")
-
-# ----------- 파일 삭제 기능 ------------
-
-def file_delete_ui(folder_path, label):
-    files = os.listdir(folder_path)
-    if files:
-        st.write("### " + label)
-        for file_name in files:
-            col1, col2 = st.columns([8, 1])
-            with col1:
-                st.write(file_name)
-            with col2:
-                if st.button("❌", key=f"delete_{folder_path}_{file_name}"):
-                    os.remove(os.path.join(folder_path, file_name))
-                    st.experimental_rerun()
-
+# 삭제 UI
 with st.expander("🗑️ 업로드된 파일 삭제하기"):
-    file_delete_ui(SPEC_DIR, "스펙 엑셀파일")
-    file_delete_ui(TEMPLATE_DIR, "QC시트 양식")
-    file_delete_ui(IMAGE_DIR, "이미지 파일")
+    for label, path in ("스펙", SPEC_DIR), ("양식", TEMPLATE_DIR), ("이미지", IMAGE_DIR):
+        files = os.listdir(path)
+        if files:
+            st.markdown(f"**{label} 파일**")
+            for fn in files:
+                cols = st.columns([8,1])
+                cols[0].write(fn)
+                if cols[1].button("❌", key=f"del_{path}_{fn}"):
+                    os.remove(os.path.join(path, fn))
+                    st.experimental_rerun()
 
 st.markdown("---")
 
-# ----------- QC시트 생성 ------------
+# -------------------------------------------------------
+# QC시트 생성 파트
+# -------------------------------------------------------
 
 st.subheader("📄 QC시트 생성")
 
-# 스펙 파일 선택
 spec_files = os.listdir(SPEC_DIR)
 selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
-
-# 스타일넘버 입력
-style_number = st.text_input("스타일넘버 입력", "JXFTO11")
-
-# 사이즈 선택
-size_options = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]
+style_number = st.text_input("스타일넘버 입력")
+size_options = ["XS","S","M","L","XL","2XL","3XL","4XL"]
 selected_size = st.selectbox("사이즈 선택", size_options)
-
-# 로고 선택
-image_files = os.listdir(IMAGE_DIR)
-logo_options = ["(기본 로고 사용)"] + image_files
-selected_logo = st.selectbox("서명/로고 선택", logo_options)
-
+logo_files = ["(기본 로고 사용)"] + os.listdir(IMAGE_DIR)
+selected_logo = st.selectbox("서명/로고 선택", logo_files)
 
 if st.button("🚀 QC시트 생성"):
-    if not selected_spec:
-        st.error("⚠️ 스펙 엑셀파일이 없습니다. 먼저 업로드해 주세요.")
-    else:
-        spec_path = os.path.join(SPEC_DIR, selected_spec)
-        template_files = os.listdir(TEMPLATE_DIR)
-        if not template_files:
-            st.error("⚠️ QC시트 양식 파일이 없습니다. 먼저 업로드해 주세요.")
-        else:
-            template_path = os.path.join(TEMPLATE_DIR, template_files[0])  # 첫 번째 양식 사용
+    # 기본 검증
+    if not selected_spec or not style_number:
+        st.error("⚠️ 스펙 파일과 스타일넘버를 확인하세요.")
+        st.stop()
+    template_list = os.listdir(TEMPLATE_DIR)
+    if not template_list:
+        st.error("⚠️ QC시트 양식이 없습니다. 업로드해주세요.")
+        st.stop()
 
-            # 워크북 로드
-            wb_spec = load_workbook(spec_path, data_only=True)
-            wb_template = load_workbook(template_path)
-            ws_template = wb_template.active
+    spec_path = os.path.join(SPEC_DIR, selected_spec)
+    template_path = os.path.join(TEMPLATE_DIR, template_list[0])
 
-            # 스타일넘버 & 사이즈 입력
-            ws_template["B6"] = style_number
-            ws_template["G6"] = selected_size
+    wb_spec = load_workbook(spec_path, data_only=True)
+    ws_spec = wb_spec.active
 
-            # 로고 삽입 (선택 시)
-            if selected_logo != "(기본 로고 사용)":
-                logo_path = os.path.join(IMAGE_DIR, selected_logo)
-                img = XLImage(logo_path)
-                ws_template.add_image(img, "F2")
+    wb_tpl = load_workbook(template_path)
+    ws_tpl = wb_tpl.active
 
-            # 스펙 시트에서 측정 데이터 추출
-            spec_ws = wb_spec.active
+    # 1) 스타일넘버 & 사이즈 입력
+    ws_tpl["B6"] = style_number
+    ws_tpl["G6"] = selected_size
 
-            # 사이즈 열 찾기 (2행)
-            size_row = list(spec_ws.iter_rows(min_row=2, max_row=2, values_only=True))[0]
-            size_dict = {str(cell): idx for idx, cell in enumerate(size_row)}
-            if selected_size not in size_dict:
-                st.error("⚠️ 선택한 사이즈를 찾을 수 없습니다. 스펙 파일을 확인하세요.")
-            else:
-                size_col_idx = size_dict[selected_size] + 1  # 1-indexed
+    # 2) 로고 삽입 (선택)
+    if selected_logo != "(기본 로고 사용)":
+        logo_path = os.path.join(IMAGE_DIR, selected_logo)
+        ws_tpl.add_image(XLImage(logo_path), "F2")
 
-                # 측정부위와 치수 추출 (3행부터)
-                measure_data = []
-                for row in spec_ws.iter_rows(min_row=3, values_only=True):
-                    part = row[0]
-                    value = row[size_col_idx - 1]
-                    if part and value is not None:
-                        measure_data.append((part, value))
+    # 3) 사이즈 열 인덱스 찾기 (2행 기준)
+    size_row = [str(x) for x in next(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))]
+    size_idx_map = {val: idx for idx, val in enumerate(size_row)}
+    if selected_size not in size_idx_map:
+        st.error("⚠️ 선택한 사이즈 열이 없습니다. 스펙 파일 확인!")
+        st.stop()
+    size_col_zero = size_idx_map[selected_size]  # 0‑index
 
-                if not measure_data:
-                    st.error("빈 치수 데이터입니다. 사이즈·시트 구성을 확인하세요.")
-                else:
-                    # 템플릿에 입력 (A9부터)
-                    start_row = 9
-                    for idx, (part, value) in enumerate(measure_data):
-                        ws_template.cell(row=start_row + idx, column=1, value=part)
-                        ws_template.cell(row=start_row + idx, column=3, value=value)
+    # 4) 측정부위(B열) & 치수 추출
+    data = []
+    for row in ws_spec.iter_rows(min_row=3, values_only=True):
+        part = str(row[1]).strip() if row[1] is not None else ""
+        value = row[size_col_zero]
+        if part and value is not None:
+            data.append((part, value))
 
-                    # 수식 삽입 (D열)
-                    for i in range(start_row, start_row + len(measure_data)):
-                        ws_template.cell(row=i, column=4, value="=IF(C{0}=\"\", \"\", IFERROR(C{0}-B{0}, \"\"))".format(i))
+    if not data:
+        st.error("⚠️ 추출된 데이터가 없습니다. 시트를 확인하세요.")
+        st.stop()
 
-                    # 결과 저장
-                    out_filename = f"QC_{style_number}_{selected_size}.xlsx"
-                    out_path = os.path.join("/tmp", out_filename)
-                    wb_template.save(out_path)
+    # 5) 템플릿에 삽입
+    start_row = 9
+    for i, (part, val) in enumerate(data):
+        r = start_row + i
+        ws_tpl.cell(r, 1, part)   # A열: 측정항목
+        ws_tpl.cell(r, 2, val)    # B열: 스펙 사이즈 값
+        ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")  # D열 BAL
 
-                    # 다운로드 버튼
-                    with open(out_path, "rb") as f:
-                        st.download_button("📥 QC시트 다운로드", f, file_name=out_filename)
+    # 6) 저장 & 다운로드
+    out_name = f"QC_{style_number}_{selected_size}.xlsx"
+    tmp_path = os.path.join("/tmp", out_name)
+    wb_tpl.save(tmp_path)
 
-                    st.success("✅ QC시트가 생성되었습니다!")
+    with open(tmp_path, "rb") as f:
+        st.download_button("📥 QC시트 다운로드", f, file_name=out_name)
+
+    st.success("✅ QC시트가 생성되었습니다!")
+
