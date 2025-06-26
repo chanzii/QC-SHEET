@@ -55,7 +55,7 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
         if files:
             st.markdown(f"**{label} 파일**")
             for fn in files:
-                cols = st.columns([8,1])
+                cols = st.columns([8, 1])
                 cols[0].write(fn)
                 if cols[1].button("❌", key=f"del_{path}_{fn}"):
                     os.remove(os.path.join(path, fn))
@@ -72,7 +72,7 @@ st.subheader("📄 QC시트 생성")
 spec_files = os.listdir(SPEC_DIR)
 selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
 style_number = st.text_input("스타일넘버 입력")
-size_options = ["XS","S","M","L","XL","2XL","3XL","4XL"]
+size_options = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]
 selected_size = st.selectbox("사이즈 선택", size_options)
 logo_files = ["(기본 로고 사용)"] + os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files)
@@ -100,7 +100,7 @@ if st.button("🚀 QC시트 생성"):
             return False
         txt = str(cell_val).upper()
         style = style.upper()
-        return style in txt  # 포함 체크 (A1: "STYLE NO: JXFTO11" 등)
+        return style in txt
 
     ws_spec = None
     for ws in wb_spec.worksheets:
@@ -108,7 +108,6 @@ if st.button("🚀 QC시트 생성"):
         if matches_style(a1, style_number):
             ws_spec = ws
             break
-    # 못 찾으면 첫 시트를 사용하고 경고
     if not ws_spec:
         ws_spec = wb_spec.active
         st.warning("❗ A1 셀에서 스타일넘버가 일치하는 시트를 찾지 못해, 첫 시트를 사용합니다.")
@@ -126,13 +125,13 @@ if st.button("🚀 QC시트 생성"):
         logo_path = os.path.join(IMAGE_DIR, selected_logo)
         ws_tpl.add_image(XLImage(logo_path), "F2")
 
-    # ----------- 5. 사이즈 열 인덱스 찾기 (2행) -----------
+    # ----------- 5. 사이즈 열 인덱스 -----------
     header_row = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
     size_idx_map = {str(val).strip(): idx for idx, val in enumerate(header_row) if val}
     if selected_size not in size_idx_map:
         st.error("⚠️ 선택한 사이즈 열이 없습니다. 스펙 파일 확인!")
         st.stop()
-    size_col_zero = size_idx_map[selected_size]  # 0‑index
+    size_col = size_idx_map[selected_size]
 
     # ----------- 6. 측정부위 & 치수 추출 -----------
     rows = list(ws_spec.iter_rows(min_row=3, values_only=True))
@@ -140,9 +139,10 @@ if st.button("🚀 QC시트 생성"):
     i = 0
     while i < len(rows):
         row = rows[i]
-        part_raw = row[1]  # B열 LIST
+        part_raw = row[1]  # B열 영어
         part = str(part_raw).strip() if part_raw else ""
-        val = row[size_col_zero]
+        val = row[size_col]
+
         has_en = bool(re.search(r"[A-Za-z]", part))
         has_kr = bool(re.search(r"[가-힣]", part))
 
@@ -150,7 +150,7 @@ if st.button("🚀 QC시트 생성"):
             if has_en and val is not None:
                 data.append((part, val))
             i += 1
-        else:  # Korean 선택
+        else:  # Korean
             if has_en and val is not None and i + 1 < len(rows):
                 next_part_raw = rows[i + 1][1]
                 next_part = str(next_part_raw).strip() if next_part_raw else ""
@@ -166,13 +166,17 @@ if st.button("🚀 QC시트 생성"):
         st.error("⚠️ 추출된 데이터가 없습니다. 시트를 확인하세요.")
         st.stop()
 
-    # ----------- 7. 템플릿에 삽입 -----------
+    # ----------- 7. 템플릿 삽입 -----------
     start_row = 9
     for idx, (part, val) in enumerate(data):
         r = start_row + idx
-        ws_tpl.cell(r, 1, part)     # 측정부위
-        ws_tpl.cell(r, 2, val)      # 스펙 치수
+        ws_tpl.cell(r, 1, part)
+        ws_tpl.cell(r, 2, val)
         ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
 
     # ----------- 8. 저장 & 다운로드 -----------
-    out_name = f"QC_{style
+    out_name = f"QC_{style_number}_{selected_size}.xlsx"
+    buffer = BytesIO()
+    wb_tpl.save(buffer)
+    st.download_button("⬇️ QC시트 다운로드", data=buffer.getvalue(),
+                       file_name=out
