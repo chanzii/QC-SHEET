@@ -32,17 +32,36 @@ HEADERS   = {
 }
 
 def github_commit(local_path: str, repo_rel_path: str):
-    """local_path 파일을 repo_rel_path 위치로 커밋(생성/덮어쓰기)"""
+    """local_path 파일을 repo_rel_path 위치로 커밋(신규·덮어쓰기 모두 처리)"""
     if not GH_TOKEN or not GH_REPO:
+        st.warning("🔒 GitHub 토큰이 설정되어 있지 않아 로컬에만 저장되었습니다.")
         return
+
+    # 파일 내용을 base64 인코딩
     with open(local_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
+
+    # 1️⃣ 먼저 현재 repo 경로에 파일이 존재하는지 조회 → sha 확보
+    sha = None
+    r = requests.get(f"{GH_API}/{repo_rel_path}", params={"ref": GH_BRANCH}, headers=HEADERS)
+    if r.status_code == 200:
+        sha = r.json().get("sha")  # 기존 파일 sha
+
+    # 2️⃣ PUT (생성 or 업데이트). sha 가 있으면 업데이트, 없으면 새 파일
     payload = {
         "message": f"upload {repo_rel_path}",
         "content": content,
-        "branch" : GH_BRANCH
+        "branch" : GH_BRANCH,
     }
-    requests.put(f"{GH_API}/{repo_rel_path}", headers=HEADERS, data=json.dumps(payload))
+    if sha:
+        payload["sha"] = sha
+
+    r = requests.put(f"{GH_API}/{repo_rel_path}", headers=HEADERS, data=json.dumps(payload))
+
+    if r.status_code in (200, 201):
+        st.toast("✅ GitHub 커밋 완료", icon="🎉")
+    else:
+        st.error(f"❌ GitHub 커밋 실패: {r.status_code} {r.json().get('message')}"))
 
 def github_delete(repo_rel_path: str):
     if not GH_TOKEN or not GH_REPO:
