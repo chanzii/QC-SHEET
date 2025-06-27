@@ -195,12 +195,22 @@ if st.button("🚀 QC시트 생성"):
     wb_tpl.save(buf)
     buf.seek(0)
 
+    # QC시트 다운로드 버튼
     st.download_button(
         "⬇️ QC시트 다운로드",
         data=buf.getvalue(),
         file_name=out,
         key=f"dl_{out}"
     )
+
+    # 선택한 스펙 엑셀도 함께 다운로드할 수 있는 버튼
+    with open(spec_path, "rb") as sf:
+        st.download_button(
+            "⬇️ 스펙 엑셀 다운로드",
+            data=sf.read(),
+            file_name=selected_spec,
+            key=f"spec_{selected_spec}"
+        )
     st.success("✅ QC시트 생성 완료!")
 
 
