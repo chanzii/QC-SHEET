@@ -61,7 +61,7 @@ def github_commit(local_path: str, repo_rel_path: str):
     if r.status_code in (200, 201):
         st.toast("✅ GitHub 커밋 완료", icon="🎉")
     else:
-        st.error(f"❌ GitHub 커밋 실패: {r.status_code} {r.json().get('message')}"))
+        st.error(f"❌ GitHub 커밋 실패: {r.status_code} {r.json().get('message')}")
 
 def github_delete(repo_rel_path: str):
     if not GH_TOKEN or not GH_REPO:
@@ -189,6 +189,11 @@ if st.button("🚀 QC시트 생성"):
     for j,(p,v) in enumerate(data):
         r=9+j; ws_tpl.cell(r,1,p); ws_tpl.cell(r,2,v)
         ws_tpl.cell(r,4,f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
+
+    out=f"QC_{style_number}_{selected_size}.xlsx"; buf=BytesIO(); wb_tpl.save(buf); buf.seek(0)
+    st.download_button("⬇️ QC시트 다운로드", buf.getvalue(), file_name=out)
+    st.success("✅ QC시트 생성 완료!")
+
 
     out=f"QC_{style_number}_{selected_size}.xlsx"; buf=BytesIO(); wb_tpl.save(buf); buf.seek(0)
     st.download_button("⬇️ QC시트 다운로드", buf.getvalue(), file_name=out)
