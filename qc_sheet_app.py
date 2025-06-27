@@ -136,7 +136,8 @@ if st.button("🚀 QC시트 생성"):
     ws_tpl["B6"] = style_number; ws_tpl["G6"] = selected_size
     ws_tpl.add_image(XLImage(os.path.join(IMAGE_DIR, selected_logo)), "F2")
 
-    header = [str(v).strip() if v else "" for v in ws_spec.iter_rows(min_row=2, max_row=2, values_only=True)[0]]
+    header_row = next(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))
+    header = [str(v).strip() if v else "" for v in header_row]
     if selected_size not in header:
         st.error("⚠️ 사이즈 열이 없습니다."); st.stop()
     idx = header.index(selected_size)
@@ -184,6 +185,3 @@ if st.button("🚀 QC시트 생성"):
     st.download_button("⬇️ QC시트 다운로드", st.session_state.qc_buf, file_name=qc_name, key="dl_qc")
     st.download_button("⬇️ 해당 스펙 시트만 다운로드", st.session_state.spec_buf, file_name=spec_name, key="dl_spec")
     st.success("✅ QC시트 생성 완료!")
-
-
-
