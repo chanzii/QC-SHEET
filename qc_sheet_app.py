@@ -6,6 +6,9 @@ import re, json, base64, requests
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
 
+# -------------------------------------------------------
+# 기본 설정
+# -------------------------------------------------------
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
 st.title(" QC시트 생성기 ")
 
@@ -37,17 +40,16 @@ def github_commit(local_path: str, repo_rel_path: str):
         st.warning("🔒 GitHub 토큰이 설정되어 있지 않아 로컬에만 저장되었습니다.")
         return
 
-    # 파일 내용을 base64 인코딩
     with open(local_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
 
-    # 1️⃣ 먼저 현재 repo 경로에 파일이 존재하는지 조회 → sha 확보
+    # 1️⃣ 현재 파일 유무 확인해 sha 확보
     sha = None
     r = requests.get(f"{GH_API}/{repo_rel_path}", params={"ref": GH_BRANCH}, headers=HEADERS)
     if r.status_code == 200:
-        sha = r.json().get("sha")  # 기존 파일 sha
+        sha = r.json().get("sha")
 
-    # 2️⃣ PUT (생성 or 업데이트). sha 가 있으면 업데이트, 없으면 새 파일
+    # 2️⃣ PUT (생성 or 업데이트)
     payload = {
         "message": f"upload {repo_rel_path}",
         "content": content,
@@ -57,7 +59,6 @@ def github_commit(local_path: str, repo_rel_path: str):
         payload["sha"] = sha
 
     r = requests.put(f"{GH_API}/{repo_rel_path}", headers=HEADERS, data=json.dumps(payload))
-
     if r.status_code in (200, 201):
         st.toast("✅ GitHub 커밋 완료", icon="🎉")
     else:
@@ -107,9 +108,12 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
         if files:
             st.markdown(f"**{label} 파일**")
             for fn in files:
-                cols = st.columns([8,1])
+                cols = st.columns([7,1,1])
                 cols[0].write(fn)
-                if cols[1].button("❌", key=f"del_{path}_{fn}"):
+                # ⬇️ 다운로드 버튼
+                cols[1].download_button("⬇️", data=Path(os.path.join(path, fn)).read_bytes(), file_name=fn, key=f"dl_list_{path}_{fn}")
+                # ❌ 삭제 버튼
+                if cols[2].button("❌", key=f"del_{path}_{fn}"):
                     os.remove(os.path.join(path, fn))
                     github_delete(f"{repo_folder}/{fn}")
                     st.rerun()
@@ -117,19 +121,31 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
 st.markdown("---")
 
 # -------------------------------------------------------
-# QC시트 생성 파트 (기존 로직)
+# QC시트 생성 파트
 # -------------------------------------------------------
 
 st.subheader("📄 QC시트 생성")
 
-spec_files = os.listdir(SPEC_DIR)
+spec_files    = os.listdir(SPEC_DIR)
 selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
-style_number = st.text_input("스타일넘버 입력")
-size_options = ["XS","S","M","L","XL","2XL","3XL","4XL"]
-selected_size = st.selectbox("사이즈 선택", size_options)
-logo_files = os.listdir(IMAGE_DIR)
-selected_logo = st.selectbox("서명/로고 선택", logo_files) if logo_files else None
 
+# ⬇️ 선택한 스펙 파일 다운로드 버튼
+if selected_spec:
+    spec_path = os.path.join(SPEC_DIR, selected_spec)
+    with open(spec_path, "rb") as f:
+        st.download_button(
+            "⬇️ 선택한 스펙 파일 다운로드",
+            data=f.read(),
+            file_name=selected_spec,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_spec_{selected_spec}"
+        )
+
+style_number  = st.text_input("스타일넘버 입력")
+size_options  = ["XS","S","M","L","XL","2XL","3XL","4XL"]
+selected_size = st.selectbox("사이즈 선택", size_options)
+logo_files    = os.listdir(IMAGE_DIR)
+selected_logo = st.selectbox("서명/로고 선택", logo_files) if logo_files else None
 language_choice = st.selectbox("측정부위 언어", ["English", "Korean"], index=0)
 
 if st.button("🚀 QC시트 생성"):
@@ -159,36 +175,42 @@ if st.button("🚀 QC시트 생성"):
 
     wb_tpl = load_workbook(template_path)
     ws_tpl = wb_tpl.active
-    ws_tpl["B6"] = style_number; ws_tpl["G6"] = selected_size
+    ws_tpl["B6"] = style_number
+    ws_tpl["G6"] = selected_size
     ws_tpl.add_image(XLImage(os.path.join(IMAGE_DIR, selected_logo)), "F2")
 
     header = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
     size_map = {str(v).strip(): idx for idx,v in enumerate(header) if v}
     if selected_size not in size_map:
-        st.error("⚠️ 사이즈 열이 없습니다."); st.stop()
+        st.error("⚠️ 사이즈 열이 없습니다.")
+        st.stop()
     idx = size_map[selected_size]
 
     data, rows = [], list(ws_spec.iter_rows(min_row=3, values_only=True))
-    i=0
+    i = 0
     while i < len(rows):
         part = str(rows[i][1]).strip() if rows[i][1] else ""; val = rows[i][idx]
-        if language_choice=="English":
+        if language_choice == "English":
             if re.search(r"[A-Za-z]", part) and val is not None:
-                data.append((part,val)); i+=1; continue
-        else:
-            if re.search(r"[A-Za-z]", part) and val is not None and i+1<len(rows):
-                kr = str(rows[i+1][1]).strip() if rows[i+1][1] else ""
-                if re.search(r"[가-힣]",kr): data.append((kr,val)); i+=2; continue
+                data.append((part, val)); i += 1; continue
+        else:  # Korean
+            if re.search(r"[A-Za-z]", part) and val is not None and i + 1 < len(rows):
+                kr = str(rows[i + 1][1]).strip() if rows[i + 1][1] else ""
+                if re.search(r"[가-힣]", kr):
+                    data.append((kr, val)); i += 2; continue
             if re.search(r"[가-힣]", part) and val is not None:
-                data.append((part,val)); i+=1; continue
-        i+=1
+                data.append((part, val)); i += 1; continue
+        i += 1
 
     if not data:
-        st.error("⚠️ 추출 데이터가 없습니다."); st.stop()
+        st.error("⚠️ 추출 데이터가 없습니다.")
+        st.stop()
 
-    for j,(p,v) in enumerate(data):
-        r=9+j; ws_tpl.cell(r,1,p); ws_tpl.cell(r,2,v)
-        ws_tpl.cell(r,4,f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
+    for j, (p, v) in enumerate(data):
+        r = 9 + j
+        ws_tpl.cell(r, 1, p)
+        ws_tpl.cell(r, 2, v)
+        ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
 
     out = f"QC_{style_number}_{selected_size}.xlsx"
     buf = BytesIO()
@@ -203,21 +225,3 @@ if st.button("🚀 QC시트 생성"):
     )
     st.success("✅ QC시트 생성 완료!")
 
-st.subheader("📄 QC시트 생성")
-
-spec_files    = os.listdir(SPEC_DIR)
-selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
-
-# 🔽 추가: 선택한 스펙 파일 다운로드 버튼
-if selected_spec:
-    spec_path = os.path.join(SPEC_DIR, selected_spec)
-    with open(spec_path, "rb") as f:                  # bytes 읽기
-        st.download_button(
-            "⬇️ 선택한 스펙 파일 다운로드",
-            data=f.read(),
-            file_name=selected_spec,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_spec_{selected_spec}"
-        )
-
-style_number  = st.text_input("스타일넘버 입력")
