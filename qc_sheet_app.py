@@ -3,7 +3,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 import re, json, base64, requests
-from openpyxl import load_workbook
+from openpyxl import load_workbook, Workbook
 from openpyxl.drawing.image import Image as XLImage
 
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
@@ -203,14 +203,22 @@ if st.button("🚀 QC시트 생성"):
         key=f"dl_{out}"
     )
 
-    # 선택한 스펙 엑셀도 함께 다운로드할 수 있는 버튼
-    with open(spec_path, "rb") as sf:
-        st.download_button(
-            "⬇️ 스펙 엑셀 다운로드",
-            data=sf.read(),
-            file_name=selected_spec,
-            key=f"spec_{selected_spec}"
-        )
-    st.success("✅ QC시트 생성 완료!")
+        # 선택한 스펙 시트만 담은 엑셀 다운로드
+    wb_single = Workbook()
+    ws_new = wb_single.active
+    ws_new.title = ws_spec.title
+    for row in ws_spec.iter_rows(values_only=True):
+        ws_new.append(list(row))
+    spec_buf = BytesIO()
+    wb_single.save(spec_buf); spec_buf.seek(0)
+
+    st.download_button(
+        "⬇️ 해당 스펙 시트만 다운로드",
+        data=spec_buf.getvalue(),
+        file_name=f"{style_number}_spec_only.xlsx",
+        key=f"spec_{style_number}_{selected_size}"
+    )
+
+    st.success("✅ QC시트 생성 완료!")("✅ QC시트 생성 완료!")
 
 
