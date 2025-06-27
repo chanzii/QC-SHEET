@@ -112,7 +112,7 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
                 if cols[1].button("❌", key=f"del_{path}_{fn}"):
                     os.remove(os.path.join(path, fn))
                     github_delete(f"{repo_folder}/{fn}")
-                    st.experimental_rerun()
+                    st.rerun()
 
 st.markdown("---")
 
@@ -202,4 +202,5 @@ if st.button("🚀 QC시트 생성"):
         key=f"dl_{out}"
     )
     st.success("✅ QC시트 생성 완료!")
+
 
