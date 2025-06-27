@@ -190,11 +190,16 @@ if st.button("🚀 QC시트 생성"):
         r=9+j; ws_tpl.cell(r,1,p); ws_tpl.cell(r,2,v)
         ws_tpl.cell(r,4,f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
 
-    out=f"QC_{style_number}_{selected_size}.xlsx"; buf=BytesIO(); wb_tpl.save(buf); buf.seek(0)
+    out = f"QC_{style_number}_{selected_size}.xlsx"
+    buf = BytesIO()
+    wb_tpl.save(buf)
+    buf.seek(0)
+
     st.download_button(
         "⬇️ QC시트 다운로드",
-        buf.getvalue(),
+        data=buf.getvalue(),
         file_name=out,
         key=f"dl_{out}"
-    ), file_name=out, key=f"dl_{out}"), buf.getvalue(), file_name=out)
+    )
     st.success("✅ QC시트 생성 완료!")
+
