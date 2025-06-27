@@ -136,3 +136,22 @@ if st.button("🚀 QC시트 생성"):
     st.download_button("⬇️ QC시트 다운로드", st.session_state.qc_buf, file_name=qc_name, key="dl_qc")
     st.download_button("⬇️ 해당 스펙 시트만 다운로드", st.session_state.spec_buf, file_name=spec_name, key="dl_spec")
     st.success("✅ QC시트 생성 완료!")
+st.subheader("📄 QC시트 생성")
+
+spec_files    = os.listdir(SPEC_DIR)
+selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
+
+# 🔽 추가: 선택한 스펙 파일 다운로드 버튼
+if selected_spec:
+    spec_path = os.path.join(SPEC_DIR, selected_spec)
+    with open(spec_path, "rb") as f:                  # bytes 읽기
+        st.download_button(
+            "⬇️ 선택한 스펙 파일 다운로드",
+            data=f.read(),
+            file_name=selected_spec,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_spec_{selected_spec}"
+        )
+
+style_number  = st.text_input("스타일넘버 입력")
+...
