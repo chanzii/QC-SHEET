@@ -1,11 +1,10 @@
 import streamlit as st
-import os
+import os, subprocess, shutil, re, json, base64, requests
 from io import BytesIO
 from pathlib import Path
-import re, json, base64, requests
+from urllib.parse import quote as url_quote       # ← URL 인코딩용
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
-import subprocess, shutil      # ⬅️ git clone/pull 및 파일 복사용
 
 # -------------------------------------------------------
 # 기본 설정
@@ -24,16 +23,14 @@ for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
     os.makedirs(folder, exist_ok=True)
 
 # -------------------------------------------------------
-# GitHub API 설정
+# GitHub API 설정 (토큰·저장소 정보는 secrets.toml 또는 Cloud Secrets에!)
 # -------------------------------------------------------
-GH_TOKEN = st.secrets["GH_TOKEN"]
-GH_REPO  = st.secrets["GH_REPO"]
+GH_TOKEN  = st.secrets["GH_TOKEN"]
+GH_REPO   = st.secrets["GH_REPO"]            # ex) chanzii/QC-SHEET
 GH_BRANCH = st.secrets.get("GH_BRANCH", "main")
 GH_API    = f"https://api.github.com/repos/{GH_REPO}/contents"
-HEADERS   = {
-    "Authorization": f"token {GH_TOKEN}",
-    "Accept": "application/vnd.github+json"
-}
+HEADERS   = {"Authorization": f"token {GH_TOKEN}",
+             "Accept": "application/vnd.github+json"}
 
 # -------------------------------------------------------
 # GitHub ▶︎ 로컬 동기화 (앱 시작 시 1회)
@@ -42,27 +39,17 @@ REPO_LOCAL = Path("repo_cache")   # 임시 클론 위치
 
 def sync_repo():
     """GitHub 저장소에 있는 spec/template/image 폴더를 uploaded/ 로 복원"""
-    if not GH_TOKEN or not GH_REPO:   # 토큰 없으면 건너뜀
-        return
-
     repo_url = f"https://{GH_TOKEN}@github.com/{GH_REPO}.git"
     try:
         if REPO_LOCAL.exists():
-            subprocess.run(
-                ["git", "-C", str(REPO_LOCAL), "pull", "--quiet"],
-                check=True
-            )
+            subprocess.run(["git", "-C", str(REPO_LOCAL), "pull", "--quiet"], check=True)
         else:
-            subprocess.run(
-                ["git", "clone", "--depth", "1", "--branch", GH_BRANCH,
-                 repo_url, str(REPO_LOCAL)],
-                check=True
-            )
+            subprocess.run(["git", "clone", "--depth", "1", "--branch", GH_BRANCH,
+                            repo_url, str(REPO_LOCAL)], check=True)
     except subprocess.CalledProcessError as e:
         st.warning(f"⚠️ GitHub 동기화 실패: {e}")
         return
 
-    # spec / template / image 폴더만 복사
     for name in ("spec", "template", "image"):
         src = REPO_LOCAL / name
         dst = Path(BASE_DIR) / name
@@ -71,61 +58,51 @@ def sync_repo():
                 if f.is_file():
                     shutil.copy2(f, dst / f.name)
 
-sync_repo()   # ★ 여기서 한 번 실행
+sync_repo()   # ★ 앱 부팅 시 1회 실행
 
 # -------------------------------------------------------
-# GitHub API 유틸 (업로드 & 삭제)
+# GitHub 업로드 & 삭제 유틸
 # -------------------------------------------------------
 def github_commit(local_path: str, repo_rel_path: str):
-    """local_path 파일을 repo_rel_path 위치로 커밋(신규·덮어쓰기 모두 처리)"""
-    if not GH_TOKEN or not GH_REPO:
-        st.warning("🔒 GitHub 토큰이 설정되어 있지 않아 로컬에만 저장되었습니다.")
-        return
-
+    """local_path → GitHub (생성/덮어쓰기)"""
     with open(local_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
 
-    # 1️⃣ 현재 파일 유무 확인해 sha 확보
+    # sha 확인
     sha = None
-    r = requests.get(f"{GH_API}/{repo_rel_path}",
+    r = requests.get(f"{GH_API}/{url_quote(repo_rel_path)}",
                      params={"ref": GH_BRANCH}, headers=HEADERS)
     if r.status_code == 200:
         sha = r.json().get("sha")
 
-    # 2️⃣ PUT (생성 or 업데이트)
-    payload = {
-        "message": f"upload {repo_rel_path}",
-        "content": content,
-        "branch" : GH_BRANCH,
-    }
+    payload = {"message": f"upload {repo_rel_path}",
+               "content": content,
+               "branch": GH_BRANCH}
     if sha:
         payload["sha"] = sha
 
-    r = requests.put(f"{GH_API}/{repo_rel_path}",
+    r = requests.put(f"{GH_API}/{url_quote(repo_rel_path)}",
                      headers=HEADERS, data=json.dumps(payload))
     if r.status_code in (200, 201):
         st.toast("✅ GitHub 커밋 완료", icon="🎉")
     else:
         st.error(f"❌ GitHub 커밋 실패: {r.status_code} {r.json().get('message')}")
 
-def github_delete(repo_rel_path: str):
-    if not GH_TOKEN or not GH_REPO:
-        return
-    r = requests.get(f"{GH_API}/{repo_rel_path}",
-                     params={"ref": GH_BRANCH}, headers=HEADERS)
+def github_delete(repo_rel_path: str) -> bool:
+    """GitHub에서 파일 삭제, 성공 시 True"""
+    api = f"{GH_API}/{url_quote(repo_rel_path)}"
+    r = requests.get(api, params={"ref": GH_BRANCH}, headers=HEADERS)
     if r.status_code != 200:
-        return
+        return False
     sha = r.json().get("sha")
-    payload = {
-        "message": f"delete {repo_rel_path}",
-        "sha": sha,
-        "branch": GH_BRANCH
-    }
-    requests.put(f"{GH_API}/{repo_rel_path}",
-                 headers=HEADERS, data=json.dumps(payload))
+    payload = {"message": f"delete {repo_rel_path}",
+               "sha": sha,
+               "branch": GH_BRANCH}
+    r = requests.delete(api, headers=HEADERS, json=payload)
+    return r.status_code in (200, 204)
 
 # -------------------------------------------------------
-# 업로드 & 삭제 UI (GitHub 동기화 포함)
+# 업로드 & 삭제 UI
 # -------------------------------------------------------
 def uploader(label, subfolder, repo_folder, multiple):
     files = st.file_uploader(label,
@@ -152,23 +129,33 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
     mapping = [("스펙", SPEC_DIR, "spec"),
                ("양식", TEMPLATE_DIR, "template"),
                ("이미지", IMAGE_DIR, "image")]
-    for label, path, repo_folder in mapping:
-        files = os.listdir(path)
-        if files:
-            st.markdown(f"**{label} 파일**")
-            for fn in files:
-                cols = st.columns([7,1,1])
-                cols[0].write(fn)
-                # ⬇️ 다운로드
-                cols[1].download_button("⬇️",
-                                        data=Path(os.path.join(path, fn)).read_bytes(),
-                                        file_name=fn,
-                                        key=f"dl_list_{path}_{fn}")
-                # ❌ 삭제
-                if cols[2].button("❌", key=f"del_{path}_{fn}"):
-                    os.remove(os.path.join(path, fn))
-                    github_delete(f"{repo_folder}/{fn}")
-                    st.rerun()
+    for label, local_dir, repo_folder in mapping:
+        files = os.listdir(local_dir)
+        if not files:
+            continue
+
+        st.markdown(f"**{label} 파일**")
+        for fn in files:
+            cols = st.columns([7,1,1])
+            cols[0].write(fn)
+            # ⬇️ 다운로드
+            cols[1].download_button("⬇️",
+                                    data=Path(local_dir, fn).read_bytes(),
+                                    file_name=fn,
+                                    key=f"dl_{local_dir}_{fn}")
+            # ❌ 삭제
+            if cols[2].button("❌", key=f"del_{local_dir}_{fn}"):
+                # 1) 로컬(사용 폴더) 삭제
+                Path(local_dir, fn).unlink(missing_ok=True)
+                # 2) repo_cache 에도 삭제
+                (REPO_LOCAL / repo_folder / fn).unlink(missing_ok=True)
+                # 3) GitHub 삭제
+                ok = github_delete(f"{repo_folder}/{fn}")
+                if ok:
+                    st.toast("🗑️ GitHub 삭제 완료", icon="✅")
+                else:
+                    st.error("⚠️ GitHub 삭제 실패 – 토큰 권한·경로 확인")
+                st.rerun()
 
 st.markdown("---")
 
@@ -180,7 +167,6 @@ st.subheader("📄 QC시트 생성")
 spec_files    = os.listdir(SPEC_DIR)
 selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
 
-# ⬇️ 선택한 스펙 파일 다운로드
 if selected_spec:
     spec_path = os.path.join(SPEC_DIR, selected_spec)
     with open(spec_path, "rb") as f:
@@ -212,18 +198,14 @@ if st.button("🚀 QC시트 생성"):
     wb_spec = load_workbook(spec_path, data_only=True, read_only=True)
     def matches_style(val, style): return val and style.upper() in str(val).upper()
 
-    ws_spec = None
-    for ws in wb_spec.worksheets:
-        if matches_style(ws["A1"].value, style_number):
-            ws_spec = ws; break
-    if not ws_spec:
-        ws_spec = wb_spec.active
+    ws_spec = next((ws for ws in wb_spec.worksheets
+                    if matches_style(ws["A1"].value, style_number)), wb_spec.active)
+    if ws_spec is wb_spec.active:
         st.warning("❗ A1에서 스타일넘버를 찾지 못해 첫 시트를 사용합니다.")
 
-    wb_tpl = load_workbook(template_path)
+    wb_tpl, ws_tpl = load_workbook(template_path), None
     ws_tpl = wb_tpl.active
-    ws_tpl["B6"] = style_number
-    ws_tpl["G6"] = selected_size
+    ws_tpl["B6"], ws_tpl["G6"] = style_number, selected_size
     ws_tpl.add_image(XLImage(os.path.join(IMAGE_DIR, selected_logo)), "F2")
 
     header   = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
@@ -233,15 +215,15 @@ if st.button("🚀 QC시트 생성"):
         st.stop()
     idx = size_map[selected_size]
 
-    data, rows = [], list(ws_spec.iter_rows(min_row=3, values_only=True))
-    i = 0
+    rows = list(ws_spec.iter_rows(min_row=3, values_only=True))
+    data, i = [], 0
     while i < len(rows):
         part = str(rows[i][1]).strip() if rows[i][1] else ""
         val  = rows[i][idx]
         if language_choice == "English":
             if re.search(r"[A-Za-z]", part) and val is not None:
                 data.append((part, val)); i += 1; continue
-        else:
+        else:  # Korean
             if re.search(r"[A-Za-z]", part) and val is not None and i + 1 < len(rows):
                 kr = str(rows[i+1][1]).strip() if rows[i+1][1] else ""
                 if re.search(r"[가-힣]", kr):
@@ -268,5 +250,4 @@ if st.button("🚀 QC시트 생성"):
                        file_name=out,
                        key=f"dl_{out}")
     st.success("✅ QC시트 생성 완료!")
-
 
