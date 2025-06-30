@@ -5,6 +5,7 @@ from pathlib import Path
 import re, json, base64, requests
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
+import subprocess, shutil      # ⬅️ git clone/pull 및 파일 복사용
 
 # -------------------------------------------------------
 # 기본 설정
@@ -15,18 +16,18 @@ st.title(" QC시트 생성기 ")
 # -------------------------------------------------------
 # 경로 설정
 # -------------------------------------------------------
-BASE_DIR = "uploaded"
-SPEC_DIR = os.path.join(BASE_DIR, "spec")
+BASE_DIR     = "uploaded"
+SPEC_DIR     = os.path.join(BASE_DIR, "spec")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "template")
-IMAGE_DIR = os.path.join(BASE_DIR, "image")
+IMAGE_DIR    = os.path.join(BASE_DIR, "image")
 for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
     os.makedirs(folder, exist_ok=True)
 
 # -------------------------------------------------------
-# GitHub API 유틸 (업로드 & 삭제)
+# GitHub API 설정
 # -------------------------------------------------------
-GH_TOKEN  = st.secrets.get("GH_TOKEN", "")
-GH_REPO   = st.secrets.get("GH_REPO", "")      # e.g. "chanzii/QC-SHEET"
+GH_TOKEN = st.secrets["GH_TOKEN"]
+GH_REPO  = st.secrets["GH_REPO"]
 GH_BRANCH = st.secrets.get("GH_BRANCH", "main")
 GH_API    = f"https://api.github.com/repos/{GH_REPO}/contents"
 HEADERS   = {
@@ -34,6 +35,47 @@ HEADERS   = {
     "Accept": "application/vnd.github+json"
 }
 
+# -------------------------------------------------------
+# GitHub ▶︎ 로컬 동기화 (앱 시작 시 1회)
+# -------------------------------------------------------
+REPO_LOCAL = Path("repo_cache")   # 임시 클론 위치
+
+def sync_repo():
+    """GitHub 저장소에 있는 spec/template/image 폴더를 uploaded/ 로 복원"""
+    if not GH_TOKEN or not GH_REPO:   # 토큰 없으면 건너뜀
+        return
+
+    repo_url = f"https://{GH_TOKEN}@github.com/{GH_REPO}.git"
+    try:
+        if REPO_LOCAL.exists():
+            subprocess.run(
+                ["git", "-C", str(REPO_LOCAL), "pull", "--quiet"],
+                check=True
+            )
+        else:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", "--branch", GH_BRANCH,
+                 repo_url, str(REPO_LOCAL)],
+                check=True
+            )
+    except subprocess.CalledProcessError as e:
+        st.warning(f"⚠️ GitHub 동기화 실패: {e}")
+        return
+
+    # spec / template / image 폴더만 복사
+    for name in ("spec", "template", "image"):
+        src = REPO_LOCAL / name
+        dst = Path(BASE_DIR) / name
+        if src.exists():
+            for f in src.iterdir():
+                if f.is_file():
+                    shutil.copy2(f, dst / f.name)
+
+sync_repo()   # ★ 여기서 한 번 실행
+
+# -------------------------------------------------------
+# GitHub API 유틸 (업로드 & 삭제)
+# -------------------------------------------------------
 def github_commit(local_path: str, repo_rel_path: str):
     """local_path 파일을 repo_rel_path 위치로 커밋(신규·덮어쓰기 모두 처리)"""
     if not GH_TOKEN or not GH_REPO:
@@ -45,7 +87,8 @@ def github_commit(local_path: str, repo_rel_path: str):
 
     # 1️⃣ 현재 파일 유무 확인해 sha 확보
     sha = None
-    r = requests.get(f"{GH_API}/{repo_rel_path}", params={"ref": GH_BRANCH}, headers=HEADERS)
+    r = requests.get(f"{GH_API}/{repo_rel_path}",
+                     params={"ref": GH_BRANCH}, headers=HEADERS)
     if r.status_code == 200:
         sha = r.json().get("sha")
 
@@ -58,7 +101,8 @@ def github_commit(local_path: str, repo_rel_path: str):
     if sha:
         payload["sha"] = sha
 
-    r = requests.put(f"{GH_API}/{repo_rel_path}", headers=HEADERS, data=json.dumps(payload))
+    r = requests.put(f"{GH_API}/{repo_rel_path}",
+                     headers=HEADERS, data=json.dumps(payload))
     if r.status_code in (200, 201):
         st.toast("✅ GitHub 커밋 완료", icon="🎉")
     else:
@@ -67,7 +111,8 @@ def github_commit(local_path: str, repo_rel_path: str):
 def github_delete(repo_rel_path: str):
     if not GH_TOKEN or not GH_REPO:
         return
-    r = requests.get(f"{GH_API}/{repo_rel_path}", params={"ref": GH_BRANCH}, headers=HEADERS)
+    r = requests.get(f"{GH_API}/{repo_rel_path}",
+                     params={"ref": GH_BRANCH}, headers=HEADERS)
     if r.status_code != 200:
         return
     sha = r.json().get("sha")
@@ -76,14 +121,16 @@ def github_delete(repo_rel_path: str):
         "sha": sha,
         "branch": GH_BRANCH
     }
-    requests.put(f"{GH_API}/{repo_rel_path}", headers=HEADERS, data=json.dumps(payload))
+    requests.put(f"{GH_API}/{repo_rel_path}",
+                 headers=HEADERS, data=json.dumps(payload))
 
 # -------------------------------------------------------
 # 업로드 & 삭제 UI (GitHub 동기화 포함)
 # -------------------------------------------------------
-
 def uploader(label, subfolder, repo_folder, multiple):
-    files = st.file_uploader(label, type=["xlsx", "png", "jpg", "jpeg"], accept_multiple_files=multiple)
+    files = st.file_uploader(label,
+                             type=["xlsx", "png", "jpg", "jpeg"],
+                             accept_multiple_files=multiple)
     if files:
         for f in files:
             local_path = os.path.join(subfolder, f.name)
@@ -102,7 +149,9 @@ with col_img:
     uploader("🖼️ 서명/로고 업로드", IMAGE_DIR, "image", multiple=True)
 
 with st.expander("🗑️ 업로드된 파일 삭제하기"):
-    mapping = [("스펙", SPEC_DIR, "spec"), ("양식", TEMPLATE_DIR, "template"), ("이미지", IMAGE_DIR, "image")]
+    mapping = [("스펙", SPEC_DIR, "spec"),
+               ("양식", TEMPLATE_DIR, "template"),
+               ("이미지", IMAGE_DIR, "image")]
     for label, path, repo_folder in mapping:
         files = os.listdir(path)
         if files:
@@ -110,9 +159,12 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
             for fn in files:
                 cols = st.columns([7,1,1])
                 cols[0].write(fn)
-                # ⬇️ 다운로드 버튼
-                cols[1].download_button("⬇️", data=Path(os.path.join(path, fn)).read_bytes(), file_name=fn, key=f"dl_list_{path}_{fn}")
-                # ❌ 삭제 버튼
+                # ⬇️ 다운로드
+                cols[1].download_button("⬇️",
+                                        data=Path(os.path.join(path, fn)).read_bytes(),
+                                        file_name=fn,
+                                        key=f"dl_list_{path}_{fn}")
+                # ❌ 삭제
                 if cols[2].button("❌", key=f"del_{path}_{fn}"):
                     os.remove(os.path.join(path, fn))
                     github_delete(f"{repo_folder}/{fn}")
@@ -123,23 +175,20 @@ st.markdown("---")
 # -------------------------------------------------------
 # QC시트 생성 파트
 # -------------------------------------------------------
-
 st.subheader("📄 QC시트 생성")
 
 spec_files    = os.listdir(SPEC_DIR)
 selected_spec = st.selectbox("사용할 스펙 엑셀 선택", spec_files) if spec_files else None
 
-# ⬇️ 선택한 스펙 파일 다운로드 버튼
+# ⬇️ 선택한 스펙 파일 다운로드
 if selected_spec:
     spec_path = os.path.join(SPEC_DIR, selected_spec)
     with open(spec_path, "rb") as f:
-        st.download_button(
-            "⬇️ 선택한 스펙 파일 다운로드",
-            data=f.read(),
-            file_name=selected_spec,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_spec_{selected_spec}"
-        )
+        st.download_button("⬇️ 선택한 스펙 파일 다운로드",
+                           data=f.read(),
+                           file_name=selected_spec,
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key=f"dl_spec_{selected_spec}")
 
 style_number  = st.text_input("스타일넘버 입력")
 size_options  = ["XS","S","M","L","XL","2XL","3XL","4XL"]
@@ -157,13 +206,11 @@ if st.button("🚀 QC시트 생성"):
         st.error("⚠️ QC시트 양식이 없습니다. 업로드해주세요.")
         st.stop()
 
-    spec_path = os.path.join(SPEC_DIR, selected_spec)
+    spec_path     = os.path.join(SPEC_DIR, selected_spec)
     template_path = os.path.join(TEMPLATE_DIR, template_list[0])
 
     wb_spec = load_workbook(spec_path, data_only=True, read_only=True)
-
-    def matches_style(cell_val: str, style: str) -> bool:
-        return bool(cell_val) and style.upper() in str(cell_val).upper()
+    def matches_style(val, style): return val and style.upper() in str(val).upper()
 
     ws_spec = None
     for ws in wb_spec.worksheets:
@@ -179,8 +226,8 @@ if st.button("🚀 QC시트 생성"):
     ws_tpl["G6"] = selected_size
     ws_tpl.add_image(XLImage(os.path.join(IMAGE_DIR, selected_logo)), "F2")
 
-    header = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
-    size_map = {str(v).strip(): idx for idx,v in enumerate(header) if v}
+    header   = list(ws_spec.iter_rows(min_row=2, max_row=2, values_only=True))[0]
+    size_map = {str(v).strip(): idx for idx, v in enumerate(header) if v}
     if selected_size not in size_map:
         st.error("⚠️ 사이즈 열이 없습니다.")
         st.stop()
@@ -189,13 +236,14 @@ if st.button("🚀 QC시트 생성"):
     data, rows = [], list(ws_spec.iter_rows(min_row=3, values_only=True))
     i = 0
     while i < len(rows):
-        part = str(rows[i][1]).strip() if rows[i][1] else ""; val = rows[i][idx]
+        part = str(rows[i][1]).strip() if rows[i][1] else ""
+        val  = rows[i][idx]
         if language_choice == "English":
             if re.search(r"[A-Za-z]", part) and val is not None:
                 data.append((part, val)); i += 1; continue
-        else:  # Korean
+        else:
             if re.search(r"[A-Za-z]", part) and val is not None and i + 1 < len(rows):
-                kr = str(rows[i + 1][1]).strip() if rows[i + 1][1] else ""
+                kr = str(rows[i+1][1]).strip() if rows[i+1][1] else ""
                 if re.search(r"[가-힣]", kr):
                     data.append((kr, val)); i += 2; continue
             if re.search(r"[가-힣]", part) and val is not None:
@@ -213,15 +261,12 @@ if st.button("🚀 QC시트 생성"):
         ws_tpl.cell(r, 4, f"=IF(C{r}=\"\",\"\",IFERROR(C{r}-B{r},\"\"))")
 
     out = f"QC_{style_number}_{selected_size}.xlsx"
-    buf = BytesIO()
-    wb_tpl.save(buf)
-    buf.seek(0)
+    buf = BytesIO(); wb_tpl.save(buf); buf.seek(0)
 
-    st.download_button(
-        "⬇️ QC시트 다운로드",
-        data=buf.getvalue(),
-        file_name=out,
-        key=f"dl_{out}"
-    )
+    st.download_button("⬇️ QC시트 다운로드",
+                       data=buf.getvalue(),
+                       file_name=out,
+                       key=f"dl_{out}")
     st.success("✅ QC시트 생성 완료!")
+
 
