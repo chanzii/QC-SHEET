@@ -1,0 +1,13 @@
+name: Keep Streamlit App Awake
+
+on:
+  schedule:
+    - cron: "0 */20 * * *"  # 매 20시간마다 실행
+  workflow_dispatch:
+
+jobs:
+  wakeup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send request to keep Streamlit app awake
+        run: curl -s https://qc-sheet-q8tf4xpu5cngacm6yatzqm.streamlit.app/
