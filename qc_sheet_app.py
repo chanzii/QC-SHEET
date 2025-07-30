@@ -2,19 +2,15 @@ import streamlit as st
 import os, subprocess, shutil, re, json, base64, requests
 from io import BytesIO
 from pathlib import Path
-from urllib.parse import quote as url_quote       # ← URL 인코딩용
+from urllib.parse import quote as url_quote
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
+import xlrd
+from openpyxl import Workbook
 
-# -------------------------------------------------------
-# 기본 설정
-# -------------------------------------------------------
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
 st.title(" QC시트 생성기 ")
 
-# -------------------------------------------------------
-# 경로 설정
-# -------------------------------------------------------
 BASE_DIR     = "uploaded"
 SPEC_DIR     = os.path.join(BASE_DIR, "spec")
 TEMPLATE_DIR = os.path.join(BASE_DIR, "template")
@@ -22,23 +18,16 @@ IMAGE_DIR    = os.path.join(BASE_DIR, "image")
 for folder in (SPEC_DIR, TEMPLATE_DIR, IMAGE_DIR):
     os.makedirs(folder, exist_ok=True)
 
-# -------------------------------------------------------
-# GitHub API 설정 (토큰·저장소 정보는 secrets.toml 또는 Cloud Secrets에!)
-# -------------------------------------------------------
 GH_TOKEN  = st.secrets["GH_TOKEN"]
-GH_REPO   = st.secrets["GH_REPO"]            # ex) chanzii/QC-SHEET
+GH_REPO   = st.secrets["GH_REPO"]
 GH_BRANCH = st.secrets.get("GH_BRANCH", "main")
 GH_API    = f"https://api.github.com/repos/{GH_REPO}/contents"
 HEADERS   = {"Authorization": f"token {GH_TOKEN}",
              "Accept": "application/vnd.github+json"}
 
-# -------------------------------------------------------
-# GitHub ▶︎ 로컬 동기화 (앱 시작 시 1회)
-# -------------------------------------------------------
-REPO_LOCAL = Path("repo_cache")   # 임시 클론 위치
+REPO_LOCAL = Path("repo_cache")
 
 def sync_repo():
-    """GitHub 저장소에 있는 spec/template/image 폴더를 uploaded/ 로 복원"""
     repo_url = f"https://{GH_TOKEN}@github.com/{GH_REPO}.git"
     try:
         if REPO_LOCAL.exists():
@@ -58,17 +47,12 @@ def sync_repo():
                 if f.is_file():
                     shutil.copy2(f, dst / f.name)
 
-sync_repo()   # ★ 앱 부팅 시 1회 실행
+sync_repo()
 
-# -------------------------------------------------------
-# GitHub 업로드 & 삭제 유틸
-# -------------------------------------------------------
 def github_commit(local_path: str, repo_rel_path: str):
-    """local_path → GitHub (생성/덮어쓰기)"""
     with open(local_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
 
-    # sha 확인
     sha = None
     r = requests.get(f"{GH_API}/{url_quote(repo_rel_path)}",
                      params={"ref": GH_BRANCH}, headers=HEADERS)
@@ -89,7 +73,6 @@ def github_commit(local_path: str, repo_rel_path: str):
         st.error(f"❌ GitHub 커밋 실패: {r.status_code} {r.json().get('message')}")
 
 def github_delete(repo_rel_path: str) -> bool:
-    """GitHub에서 파일 삭제, 성공 시 True"""
     api = f"{GH_API}/{url_quote(repo_rel_path)}"
     r = requests.get(api, params={"ref": GH_BRANCH}, headers=HEADERS)
     if r.status_code != 200:
@@ -101,19 +84,46 @@ def github_delete(repo_rel_path: str) -> bool:
     r = requests.delete(api, headers=HEADERS, json=payload)
     return r.status_code in (200, 204)
 
-# -------------------------------------------------------
-# 업로드 & 삭제 UI
-# -------------------------------------------------------
+def convert_xls_to_xlsx(xls_path, xlsx_path):
+    wb_xls = xlrd.open_workbook(xls_path)
+    sheet = wb_xls.sheet_by_index(0)
+
+    wb_new = Workbook()
+    ws_new = wb_new.active
+
+    for row in range(sheet.nrows):
+        ws_new.append(sheet.row_values(row))
+
+    wb_new.save(xlsx_path)
+
 def uploader(label, subfolder, repo_folder, multiple):
     files = st.file_uploader(label,
-                             type=["xlsx", "png", "jpg", "jpeg"],
+                             type=["xls", "xlsx", "png", "jpg", "jpeg"],
                              accept_multiple_files=multiple)
     if files:
         for f in files:
-            local_path = os.path.join(subfolder, f.name)
+            filename = f.name
+            local_path = os.path.join(subfolder, filename)
+
             with open(local_path, "wb") as fp:
                 fp.write(f.getbuffer())
-            github_commit(local_path, f"{repo_folder}/{f.name}")
+
+            if filename.endswith(".xls"):
+                new_filename = filename + "x"
+                new_local_path = os.path.join(subfolder, new_filename)
+
+                try:
+                    convert_xls_to_xlsx(local_path, new_local_path)
+                    os.remove(local_path)
+                    local_path = new_local_path
+                    filename = new_filename
+                    st.toast(f"📄 {f.name} → {new_filename} 변환 완료", icon="🔁")
+                except Exception as e:
+                    st.error(f"❌ .xls 변환 실패: {e}")
+                    continue
+
+            github_commit(local_path, f"{repo_folder}/{filename}")
+
         st.success("✅ 업로드 & GitHub 커밋 완료!")
 
 st.subheader("📁 파일 업로드 및 관리")
@@ -138,18 +148,13 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
         for fn in files:
             cols = st.columns([7,1,1])
             cols[0].write(fn)
-            # ⬇️ 다운로드
             cols[1].download_button("⬇️",
                                     data=Path(local_dir, fn).read_bytes(),
                                     file_name=fn,
                                     key=f"dl_{local_dir}_{fn}")
-            # ❌ 삭제
             if cols[2].button("❌", key=f"del_{local_dir}_{fn}"):
-                # 1) 로컬(사용 폴더) 삭제
                 Path(local_dir, fn).unlink(missing_ok=True)
-                # 2) repo_cache 에도 삭제
                 (REPO_LOCAL / repo_folder / fn).unlink(missing_ok=True)
-                # 3) GitHub 삭제
                 ok = github_delete(f"{repo_folder}/{fn}")
                 if ok:
                     st.toast("🗑️ GitHub 삭제 완료", icon="✅")
@@ -159,9 +164,6 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
 
 st.markdown("---")
 
-# -------------------------------------------------------
-# QC시트 생성 파트
-# -------------------------------------------------------
 st.subheader("📄 QC시트 생성")
 
 spec_files    = os.listdir(SPEC_DIR)
@@ -223,7 +225,7 @@ if st.button("🚀 QC시트 생성"):
         if language_choice == "English":
             if re.search(r"[A-Za-z]", part) and val is not None:
                 data.append((part, val)); i += 1; continue
-        else:  # Korean
+        else:
             if re.search(r"[A-Za-z]", part) and val is not None and i + 1 < len(rows):
                 kr = str(rows[i+1][1]).strip() if rows[i+1][1] else ""
                 if re.search(r"[가-힣]", kr):
