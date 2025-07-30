@@ -5,8 +5,9 @@ from pathlib import Path
 from urllib.parse import quote as url_quote
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
-import xlrd
 from openpyxl import Workbook
+import pandas as pd
+import tempfile
 
 st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
 st.title(" QC시트 생성기 ")
@@ -84,17 +85,12 @@ def github_delete(repo_rel_path: str) -> bool:
     r = requests.delete(api, headers=HEADERS, json=payload)
     return r.status_code in (200, 204)
 
-def convert_xls_to_xlsx(xls_path, xlsx_path):
-    wb_xls = xlrd.open_workbook(xls_path)
-    sheet = wb_xls.sheet_by_index(0)
-
-    wb_new = Workbook()
-    ws_new = wb_new.active
-
-    for row in range(sheet.nrows):
-        ws_new.append(sheet.row_values(row))
-
-    wb_new.save(xlsx_path)
+def convert_xls_to_xlsx_pandas(xls_bytes, xlsx_path):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xls") as tmp:
+        tmp.write(xls_bytes)
+        tmp.flush()
+        df = pd.read_excel(tmp.name, engine="xlrd")
+    df.to_excel(xlsx_path, index=False)
 
 def uploader(label, subfolder, repo_folder, multiple):
     files = st.file_uploader(label,
@@ -105,22 +101,19 @@ def uploader(label, subfolder, repo_folder, multiple):
             filename = f.name
             local_path = os.path.join(subfolder, filename)
 
-            with open(local_path, "wb") as fp:
-                fp.write(f.getbuffer())
-
             if filename.endswith(".xls"):
                 new_filename = filename + "x"
-                new_local_path = os.path.join(subfolder, new_filename)
-
+                local_path = os.path.join(subfolder, new_filename)
                 try:
-                    convert_xls_to_xlsx(local_path, new_local_path)
-                    os.remove(local_path)
-                    local_path = new_local_path
+                    convert_xls_to_xlsx_pandas(f.getbuffer(), local_path)
                     filename = new_filename
                     st.toast(f"📄 {f.name} → {new_filename} 변환 완료", icon="🔁")
                 except Exception as e:
                     st.error(f"❌ .xls 변환 실패: {e}")
                     continue
+            else:
+                with open(local_path, "wb") as fp:
+                    fp.write(f.getbuffer())
 
             github_commit(local_path, f"{repo_folder}/{filename}")
 
@@ -252,4 +245,3 @@ if st.button("🚀 QC시트 생성"):
                        file_name=out,
                        key=f"dl_{out}")
     st.success("✅ QC시트 생성 완료!")
-
