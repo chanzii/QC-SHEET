@@ -177,15 +177,15 @@ if selected_spec:
                            key=f"dl_spec_{selected_spec}")
 
 style_number  = st.text_input("스타일넘버 입력")
-size_options  = ["XS","S","M","L","XL","2XL","3XL","4XL"]
-selected_size = st.selectbox("사이즈 선택", size_options)
+raw_size = st.text_input("사이즈 입력 (예: XS, XL, 5XL, FREE, 28, 90 등)")
+selected_size = raw_size.strip()
 logo_files    = os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files) if logo_files else None
 language_choice = st.selectbox("측정부위 언어", ["English", "Korean"], index=0)
 
 if st.button("🚀 QC시트 생성"):
-    if not selected_spec or not style_number or not selected_logo:
-        st.error("⚠️ 필수 값을 확인하세요.")
+    if not selected_spec or not style_number or not selected_logo or not selected_size:
+        st.error("⚠️ 필수 값을 확인하세요. (스펙/스타일/사이즈/로고)")
         st.stop()
     template_list = os.listdir(TEMPLATE_DIR)
     if not template_list:
