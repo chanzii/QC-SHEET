@@ -177,7 +177,7 @@ if selected_spec:
                            key=f"dl_spec_{selected_spec}")
 
 style_number  = st.text_input("스타일넘버 입력")
-raw_size = st.text_input("사이즈 입력 (예: XS, XL, 5XL, FREE, 28, 90 등)")
+raw_size = st.text_input("사이즈 입력 (예: XS, XL, 4XL, 12M 등)")
 selected_size = raw_size.strip()
 logo_files    = os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files) if logo_files else None
