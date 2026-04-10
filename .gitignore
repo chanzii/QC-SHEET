@@ -1,0 +1,21 @@
+# 시크릿/환경변수
+.env
+.env.*
+secrets.toml
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# 로컬 캐시
+repo_cache/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
