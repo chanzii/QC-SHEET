@@ -1,6 +1,7 @@
 import streamlit as st
 import os, subprocess, shutil, re, json, base64, requests
 from io import BytesIO
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import quote as url_quote       # ← URL 인코딩용
 from openpyxl import load_workbook
@@ -84,6 +85,7 @@ def github_commit(local_path: str, repo_rel_path: str):
     r = requests.put(f"{GH_API}/{url_quote(repo_rel_path)}",
                      headers=HEADERS, data=json.dumps(payload))
     if r.status_code in (200, 201):
+        github_file_date.clear()
         st.toast("✅ GitHub 커밋 완료", icon="🎉")
     else:
         st.error(f"❌ GitHub 커밋 실패: {r.status_code} {r.json().get('message')}")
@@ -100,6 +102,26 @@ def github_delete(repo_rel_path: str) -> bool:
                "branch": GH_BRANCH}
     r = requests.delete(api, headers=HEADERS, json=payload)
     return r.status_code in (200, 204)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def github_file_date(repo_rel_path):
+    """GitHub에 파일이 마지막으로 저장된 시각을 한국 시간으로 표시."""
+    try:
+        r = requests.get(
+            f"https://api.github.com/repos/{GH_REPO}/commits",
+            params={"path": repo_rel_path, "sha": GH_BRANCH, "per_page": 1},
+            headers=HEADERS,
+            timeout=10,
+        )
+        r.raise_for_status()
+        commits = r.json()
+        if commits:
+            timestamp = commits[0]["commit"]["committer"]["date"]
+            date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            return date.astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
+    except (requests.RequestException, KeyError, ValueError, TypeError):
+        pass
+    return "날짜 확인 불가"
 
 # -------------------------------------------------------
 # 업로드 & 삭제 UI
@@ -134,17 +156,18 @@ with st.expander("🗑️ 업로드된 파일 삭제하기"):
         if not files:
             continue
 
-        st.markdown(f"**{label} 파일**")
+        st.markdown(f"**{label} 파일** · 마지막 업로드/수정 시각 (한국 시간)")
         for fn in files:
-            cols = st.columns([7,1,1])
+            cols = st.columns([5, 3, 1, 1])
             cols[0].write(fn)
+            cols[1].write(github_file_date(f"{repo_folder}/{fn}"))
             # ⬇️ 다운로드
-            cols[1].download_button("⬇️",
+            cols[2].download_button("⬇️",
                                     data=Path(local_dir, fn).read_bytes(),
                                     file_name=fn,
                                     key=f"dl_{local_dir}_{fn}")
             # ❌ 삭제
-            if cols[2].button("❌", key=f"del_{local_dir}_{fn}"):
+            if cols[3].button("❌", key=f"del_{local_dir}_{fn}"):
                 # 1) 로컬(사용 폴더) 삭제
                 Path(local_dir, fn).unlink(missing_ok=True)
                 # 2) repo_cache 에도 삭제
