@@ -183,7 +183,24 @@ logo_files    = os.listdir(IMAGE_DIR)
 selected_logo = st.selectbox("서명/로고 선택", logo_files) if logo_files else None
 language_choice = st.selectbox("측정부위 언어", ["English", "Korean"], index=0)
 
-if st.button("🚀 QC시트 생성"):
+request_key = (selected_spec, style_number, selected_size, selected_logo, language_choice)
+if st.session_state.get("qc_pending_key") != request_key:
+    st.session_state.pop("qc_pending_key", None)
+
+generate = st.button("🚀 QC시트 생성")
+use_first_sheet = False
+if st.session_state.get("qc_pending_key") == request_key:
+    st.warning("스타일번호를 찾지 못했습니다. 맨 앞의 스펙을 사용할까요?")
+    yes_col, no_col = st.columns(2)
+    if yes_col.button("네, 사용합니다"):
+        use_first_sheet = True
+        generate = True
+        st.session_state.pop("qc_pending_key", None)
+    if no_col.button("아니요, 취소합니다"):
+        st.session_state.pop("qc_pending_key", None)
+        st.rerun()
+
+if generate:
     if not selected_spec or not style_number or not selected_logo or not selected_size:
         st.error("⚠️ 필수 값을 확인하세요. (스펙/스타일/사이즈/로고)")
         st.stop()
@@ -199,9 +216,13 @@ if st.button("🚀 QC시트 생성"):
     def matches_style(val, style): return val and style.upper() in str(val).upper()
 
     ws_spec = next((ws for ws in wb_spec.worksheets
-                    if matches_style(ws["A1"].value, style_number)), wb_spec.active)
-    if ws_spec is wb_spec.active:
-        st.warning("❗ A1에서 스타일넘버를 찾지 못해 첫 시트를 사용합니다.")
+                    if matches_style(ws["A1"].value, style_number)), None)
+    if ws_spec is None:
+        if not use_first_sheet:
+            wb_spec.close()
+            st.session_state["qc_pending_key"] = request_key
+            st.rerun()
+        ws_spec = wb_spec.worksheets[0]
 
     wb_tpl, ws_tpl = load_workbook(template_path), None
     ws_tpl = wb_tpl.active
