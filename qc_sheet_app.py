@@ -10,8 +10,12 @@ from openpyxl.drawing.image import Image as XLImage
 # -------------------------------------------------------
 # 기본 설정
 # -------------------------------------------------------
-st.set_page_config(page_title="QC시트 자동 생성기", layout="centered")
-st.title(" QC시트 생성기 ")
+st.set_page_config(page_title="업무툴", layout="centered")
+st.title("업무툴")
+st.markdown("[시장결제 자료 제작 열기](app/static/market_single.html)")
+st.caption("시장결제 자료는 브라우저에서 처리합니다.")
+st.divider()
+st.header("QC시트 생성기")
 
 # -------------------------------------------------------
 # 경로 설정
@@ -294,3 +298,4 @@ if generate:
                        file_name=out,
                        key=f"dl_{out}")
     st.success("✅ QC시트 생성 완료!")
+
