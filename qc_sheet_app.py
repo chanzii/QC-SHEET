@@ -20,7 +20,7 @@ st.markdown("""<style>
 with st.sidebar:
     st.markdown("""<div class="work-title">업무툴</div>
 <a class="work-link active" href="/" target="_self">QC시트 제작</a>
-<a class="work-link" href="/app/static/market_single.html" target="_self">시장결제 자료 제작</a>""", unsafe_allow_html=True)
+<a class="work-link" href="app/static/market_single.html" target="_self">시장결제 자료 제작</a>""", unsafe_allow_html=True)
 st.title("QC시트 생성기")
 
 # -------------------------------------------------------
